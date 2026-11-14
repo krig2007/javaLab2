@@ -1,9 +1,4 @@
 package db.model;
 
-public enum DataType {
-    INT,
-    DOUBLE,
-    STRING,
-    DATE,
-    BOOLEAN
-}
+/** Поддерживаемые типы данных колонок. */
+public enum DataType { INT, DOUBLE, STRING, DATE, BOOLEAN }

@@ -1,5 +1,6 @@
 package db.query;
 
+import db.*;
 import db.model.*;
 
 import java.util.ArrayList;
@@ -7,262 +8,171 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Исполнитель разобранных запросов.
+ * <p>Возвращает {@link QueryResult}; печать в консоль — в {@link ConsolePrinter},
+ * отображение в Swing — в {@code gui.MainFrame}.</p>
+ */
 public class QueryExecutor {
+    private final Database db;
 
-    public static void execute(String sql, Database db) {
-        QueryParser.Query q = QueryParser.parse(sql);
-        if (q == null) {
-            System.out.println("Ошибка: Не удалось распознать команду. Проверьте синтаксис.");
-            return;
-        }
+    public QueryExecutor(Database db) { this.db = db; }
 
-        Table table = db.getTable(q.tableName);
-        if (table == null && !q.type.equals("CREATE")) { // CREATE мы пока не делаем
-            System.out.println("Ошибка: Таблица '" + q.tableName + "' не существует.");
-            return;
-        }
-
-        try {
-            switch (q.type) {
-                case "INSERT":
-                    executeInsert(q, table);
-                    break;
-                case "SELECT":
-                    executeSelect(q, table);
-                    break;
-                case "UPDATE":
-                    executeUpdate(q, table);
-                    break;
-                case "DELETE":
-                    executeDelete(q, table);
-                    break;
-                default:
-                    System.out.println("Ошибка: Неизвестная команда.");
-            }
-        } catch (Exception e) {
-            System.out.println("Ошибка выполнения: " + e.getMessage());
+    /** Выполняет запрос. */
+    public QueryResult execute(Query q) throws DbException {
+        if (q == null || q.type == null) throw new DbException("Некорректный запрос");
+        switch (q.type) {
+            case INSERT:        return executeInsert(q);
+            case SELECT:        return executeSelect(q);
+            case UPDATE:        return executeUpdate(q);
+            case DELETE:        return executeDelete(q);
+            case CREATE_INDEX:  return executeCreateIndex(q);
+            case CREATE_TABLE:  return executeCreateTable(q);
+            case DROP_TABLE:    return executeDropTable(q);
+            default: throw new DbException("Неизвестный тип запроса: " + q.type);
         }
     }
 
-    // --- Логика INSERT ---
-    private static void executeInsert(QueryParser.Query q, Table table) throws Exception {
-        // Разбиваем строку значений по запятым, игнорируя запятые внутри кавычек (упрощенно)
-        String[] rawValues = q.columnsOrValues.split(",");
-        Row row = new Row();
-
-        int index = 0;
-        for (Map.Entry<String, DataType> col : table.getSchema().entrySet()) {
-            if (index >= rawValues.length) break;
-
-            String raw = rawValues[index].trim();
-            Value val = parseValue(raw, col.getValue());
-            row.set(col.getKey(), val);
-            index++;
-        }
-
-        table.insert(row);
-        System.out.println("Успешно добавлена 1 запись.");
+    private Table requireTable(String name) throws TableNotFoundException {
+        Table t = db.getTable(name);
+        if (t == null) throw new TableNotFoundException(name);
+        return t;
     }
 
-    // --- Логика SELECT ---
-    private static void executeSelect(QueryParser.Query q, Table table) {
-        List<Row> rows = table.getRows();
-        List<Row> filteredRows = new ArrayList<>();
-        boolean indexUsed = false;
-
-        // 1. Пробуем использовать индекс
-        if (q.whereClause != null && q.whereClause.contains("=")) {
-            String col = q.whereClause.split("=")[0].trim();
-            Index idx = table.getIndex(col);
-            if (idx != null) {
-                String valStr = q.whereClause.split("=")[1].trim().replace("'", "");
-                filteredRows = idx.getRows(valStr);
-                indexUsed = true;
-                System.out.println("(Использован индекс для ускорения)");
-            }
+    // ---------- INSERT ----------
+    private QueryResult executeInsert(Query q) throws DbException {
+        Table table = requireTable(q.tableName);
+        List<String> cols = q.insertColumns != null
+                ? q.insertColumns
+                : new ArrayList<>(table.getSchema().keySet());
+        for (String c : cols) {
+            if (!table.getSchema().containsKey(c))
+                throw new ExecutionException("Колонка не найдена: " + c);
         }
+        int count = 0;
+        for (List<String> rawRow : q.insertValues) {
+            if (rawRow.size() != cols.size()) {
+                throw new ExecutionException("Количество значений (" + rawRow.size()
+                        + ") не совпадает с количеством колонок (" + cols.size() + ")");
+            }
+            Row row = new Row();
+            for (int i = 0; i < cols.size(); i++) {
+                String col = cols.get(i);
+                DataType type = table.getSchema().get(col);
+                Value v = WhereClause.parseLiteral(rawRow.get(i), type);
+                row.set(col, v);
+            }
+            table.insert(row);
+            count++;
+        }
+        return QueryResult.message("Успешно добавлено записей: " + count, true);
+    }
 
-        // 2. Если индекс не использовался — делаем полный перебор (O(n))
-        if (!indexUsed) {
-            if (q.whereClause != null && !q.whereClause.trim().isEmpty()) {
-                for (Row row : rows) {
-                    if (matchesWhere(row, q.whereClause)) {
-                        filteredRows.add(row);
+    // ---------- SELECT ----------
+    private QueryResult executeSelect(Query q) throws DbException {
+        Table table = requireTable(q.tableName);
+        WhereClause wc = WhereClause.parse(q.whereClause);
+        List<Row> result;
+        String extraMsg = null;
+
+        if (wc == null) {
+            result = new ArrayList<>(table.getRows());
+        } else {
+            DataType type = table.getSchema().get(wc.column);
+            if (type == null) throw new ExecutionException("Колонка не найдена: " + wc.column);
+            wc.prepare(type);
+
+            if ("=".equals(wc.operator) && table.hasIndex(wc.column)) {
+                Value key = WhereClause.parseLiteral(wc.rawValue, type);
+                result = new ArrayList<>();
+                if (key != null && key.getData() != null) {
+                    for (Row r : table.getIndex(wc.column).lookup(key.getData())) {
+                        if (wc.matches(r)) result.add(r);
                     }
                 }
+                extraMsg = "(использован индекс: " + wc.column + ")";
             } else {
-                filteredRows.addAll(rows);
+                result = new ArrayList<>();
+                for (Row row : table.getRows()) if (wc.matches(row)) result.add(row);
             }
         }
 
-        // 3. Вывод результата (выравнивание)
-        Map<String, Integer> colWidths = new LinkedHashMap<>();
-        for (String col : table.getSchema().keySet()) {
-            colWidths.put(col, col.length());
+        List<String> cols = q.selectColumns != null
+                ? q.selectColumns
+                : new ArrayList<>(table.getSchema().keySet());
+        for (String c : cols) {
+            if (!table.getSchema().containsKey(c))
+                throw new ExecutionException("Колонка не найдена: " + c);
         }
-
-        for (Row row : filteredRows) {
-            for (String col : table.getSchema().keySet()) {
-                int len = row.get(col).toString().length();
-                if (len > colWidths.get(col)) {
-                    colWidths.put(col, len);
-                }
-            }
-        }
-
-        System.out.println("Результат запроса:");
-
-        StringBuilder header = new StringBuilder();
-        for (String col : table.getSchema().keySet()) {
-            header.append(String.format("%-" + (colWidths.get(col) + 2) + "s", col));
-        }
-        System.out.println(header.toString());
-
-        for (Row row : filteredRows) {
-            StringBuilder line = new StringBuilder();
-            for (String col : table.getSchema().keySet()) {
-                line.append(String.format("%-" + (colWidths.get(col) + 2) + "s", row.get(col).toString()));
-            }
-            System.out.println(line.toString());
-        }
+        return QueryResult.table(cols, result, extraMsg);
     }
 
-    // Вспомогательный метод для проверки условия WHERE
-    private static boolean matchesWhere(Row row, String whereClause) {
-        // Пока поддерживаем только простые условия: колонка оператор значение
-        // Например: price > 20000, brand = 'Toyota', id = 1
-        whereClause = whereClause.trim();
-
-        // Ищем операторы >=, <=, !=, =, >, <
-        String[] operators = {">=", "<=", "!=", "=", ">", "<"};
-        String op = null;
-        int opIndex = -1;
-
-        for (String operator : operators) {
-            opIndex = whereClause.indexOf(operator);
-            if (opIndex != -1) {
-                op = operator;
-                break;
-            }
+    // ---------- UPDATE ----------
+    private QueryResult executeUpdate(Query q) throws DbException {
+        Table table = requireTable(q.tableName);
+        WhereClause wc = WhereClause.parse(q.whereClause);
+        if (wc != null) {
+            DataType type = table.getSchema().get(wc.column);
+            if (type == null) throw new ExecutionException("Колонка не найдена: " + wc.column);
+            wc.prepare(type);
         }
-
-        if (op == null) {
-            throw new RuntimeException("Неверный оператор в WHERE: " + whereClause);
+        LinkedHashMap<String, Value> prepared = new LinkedHashMap<>();
+        for (Map.Entry<String, String> e : q.setClauses.entrySet()) {
+            String col = e.getKey();
+            DataType type = table.getSchema().get(col);
+            if (type == null) throw new ExecutionException("Колонка не найдена: " + col);
+            prepared.put(col, WhereClause.parseLiteral(e.getValue(), type));
         }
-
-        String column = whereClause.substring(0, opIndex).trim();
-        String rawValue = whereClause.substring(opIndex + op.length()).trim();
-
-        Value rowValue = row.get(column);
-        if (rowValue == null) {
-            throw new RuntimeException("Колонка не найдена в таблице: " + column);
-        }
-
-        // Парсим значение из строки в правильный тип (как в INSERT)
-        Value targetValue = parseValue(rawValue, rowValue.getType());
-
-        // Сравниваем значения (все приводим к одному типу)
-        Object val1 = rowValue.getData();
-        Object val2 = targetValue.getData();
-
-        if (val1 instanceof Number && val2 instanceof Number) {
-            double d1 = ((Number) val1).doubleValue();
-            double d2 = ((Number) val2).doubleValue();
-            switch (op) {
-                case "=": return d1 == d2;
-                case "!=": return d1 != d2;
-                case ">": return d1 > d2;
-                case "<": return d1 < d2;
-                case ">=": return d1 >= d2;
-                case "<=": return d1 <= d2;
-            }
-        } else if (val1 instanceof String && val2 instanceof String) {
-            String s1 = (String) val1;
-            String s2 = (String) val2;
-            switch (op) {
-                case "=": return s1.equals(s2);
-                case "!=": return !s1.equals(s2);
-                case ">": return s1.compareTo(s2) > 0;
-                case "<": return s1.compareTo(s2) < 0;
-                case ">=": return s1.compareTo(s2) >= 0;
-                case "<=": return s1.compareTo(s2) <= 0;
-            }
-        } else if (val1 instanceof Boolean && val2 instanceof Boolean) {
-            boolean b1 = (Boolean) val1;
-            boolean b2 = (Boolean) val2;
-            switch (op) {
-                case "=": return b1 == b2;
-                case "!=": return b1 != b2;
-            }
-        }
-        return false;
-    }
-
-    // Вспомогательный метод: превращает строку из SQL в Value
-    private static Value parseValue(String raw, DataType type) {
-        raw = raw.replace("'", ""); // Убираем кавычки для строк
-
-        switch (type) {
-            case INT:
-                return new Value(type, Integer.parseInt(raw));
-            case DOUBLE:
-                return new Value(type, Double.parseDouble(raw));
-            case STRING:
-                return new Value(type, raw);
-            case BOOLEAN:
-                return new Value(type, Boolean.parseBoolean(raw));
-            case DATE:
-                // Пока упрощенно, для простоты можно сохранять как строку
-                return new Value(type, raw);
-            default:
-                return null;
-        }
-    }
-    // --- Логика UPDATE ---
-    private static void executeUpdate(QueryParser.Query q, Table table) throws Exception {
-        // q.columnsOrValues содержит "price = 30000" (то, что после SET)
-        // q.whereClause содержит "id = 2"
-
-        String[] parts = q.columnsOrValues.split("=");
-        if (parts.length != 2) {
-            throw new Exception("Неверный синтаксис UPDATE. Ожидается: SET колонка = значение");
-        }
-        String colName = parts[0].trim();
-        String rawValue = parts[1].trim();
-
-        DataType type = table.getSchema().get(colName);
-        if (type == null) throw new Exception("Колонка не найдена: " + colName);
-
-        Value newValue = parseValue(rawValue, type);
-
-        int count = 0;
-        // Проходим по всем строкам, проверяем WHERE
+        List<Row> targets = new ArrayList<>();
         for (Row row : table.getRows()) {
-            if (q.whereClause == null || matchesWhere(row, q.whereClause)) {
-                row.set(colName, newValue);
-                count++;
+            if (wc == null || wc.matches(row)) targets.add(row);
+        }
+        for (Row row : targets) {
+            for (Map.Entry<String, Value> e : prepared.entrySet()) {
+                table.update(row, e.getKey(), e.getValue());
             }
         }
-        System.out.println("Обновлено записей: " + count);
+        return QueryResult.message("Обновлено записей: " + targets.size(), true);
     }
 
-    // --- Логика DELETE ---
-    private static void executeDelete(QueryParser.Query q, Table table) {
-        List<Row> rowsToKeep = new ArrayList<>();
-        int count = 0;
-
-        for (Row row : table.getRows()) {
-            if (q.whereClause == null || matchesWhere(row, q.whereClause)) {
-                count++; // Эту строку удаляем
-            } else {
-                rowsToKeep.add(row); // Эту оставляем
-            }
+    // ---------- DELETE ----------
+    private QueryResult executeDelete(Query q) throws DbException {
+        Table table = requireTable(q.tableName);
+        WhereClause wc = WhereClause.parse(q.whereClause);
+        if (wc != null) {
+            DataType type = table.getSchema().get(wc.column);
+            if (type == null) throw new ExecutionException("Колонка не найдена: " + wc.column);
+            wc.prepare(type);
         }
+        List<Row> toDelete = new ArrayList<>();
+        for (Row row : table.getRows()) {
+            if (wc == null || wc.matches(row)) toDelete.add(row);
+        }
+        for (Row row : toDelete) table.delete(row);
+        return QueryResult.message("Удалено записей: " + toDelete.size(), true);
+    }
 
-        // Очищаем список и кладем обратно только те, что выжили
-        table.getRows().clear();
-        table.getRows().addAll(rowsToKeep);
+    // ---------- CREATE INDEX ----------
+    private QueryResult executeCreateIndex(Query q) throws DbException {
+        Table table = requireTable(q.tableName);
+        table.createIndex(q.indexColumn);
+        return QueryResult.message("Создан индекс '" + q.indexName + "' на "
+                + q.tableName + "(" + q.indexColumn + ")", true);
+    }
 
-        System.out.println("Удалено записей: " + count);
+    // ---------- CREATE TABLE ----------
+    private QueryResult executeCreateTable(Query q) throws DbException {
+        if (db.hasTable(q.tableName))
+            throw new ExecutionException("Таблица уже существует: " + q.tableName);
+        Table t = new Table(q.tableName, q.createSchema, q.primaryKeyColumn);
+        db.addTable(t);
+        return QueryResult.message("Создана таблица '" + q.tableName + "'", true);
+    }
+
+    // ---------- DROP TABLE ----------
+    private QueryResult executeDropTable(Query q) throws DbException {
+        if (!db.hasTable(q.tableName)) throw new TableNotFoundException(q.tableName);
+        db.dropTable(q.tableName);
+        return QueryResult.message("Удалена таблица '" + q.tableName + "'", true);
     }
 }
