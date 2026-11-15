@@ -17,7 +17,7 @@ public class QueryExecutor {
         }
 
         Table table = db.getTable(q.tableName);
-        if (table == null && !q.type.equals("CREATE")) { // CREATE мы пока не делаем
+        if (table == null && !q.type.equals("CREATE")) {
             System.out.println("Ошибка: Таблица '" + q.tableName + "' не существует.");
             return;
         }
@@ -35,6 +35,13 @@ public class QueryExecutor {
                     break;
                 case "DELETE":
                     executeDelete(q, table);
+                    break;
+                case "CREATE":
+                    executeCreate(q, db);
+                    break;
+                case "DROP":
+                    db.dropTable(q.tableName); // метод уже есть в Database.java
+                    System.out.println("Таблица '" + q.tableName + "' удалена.");
                     break;
                 default:
                     System.out.println("Ошибка: Неизвестная команда.");
@@ -264,5 +271,26 @@ public class QueryExecutor {
         table.getRows().addAll(rowsToKeep);
 
         System.out.println("Удалено записей: " + count);
+    }
+
+    private static void executeCreate(QueryParser.Query q, Database db) {
+        if (db.hasTable(q.tableName)) {
+            System.out.println("Ошибка: Таблица уже существует.");
+            return;
+        }
+        LinkedHashMap<String, DataType> schema = new LinkedHashMap<>();
+        // Парсим строку "id INT, brand STRING"
+        String[] cols = q.columnsOrValues.split(",");
+        String pk = null;
+        for (String col : cols) {
+            String[] parts = col.trim().split("\\s+");
+            String colName = parts[0];
+            DataType type = DataType.valueOf(parts[1].toUpperCase());
+            schema.put(colName, type);
+            if (pk == null) pk = colName; // первая колонка — первичный ключ
+        }
+        Table table = new Table(q.tableName, schema, pk);
+        db.addTable(table);
+        System.out.println("Таблица '" + q.tableName + "' создана.");
     }
 }

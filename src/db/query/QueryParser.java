@@ -13,6 +13,10 @@ public class QueryParser {
             "UPDATE\\s+(\\w+)\\s+SET\\s+(.*?)\\s+WHERE\\s+(.*)", Pattern.CASE_INSENSITIVE);
     private static final Pattern DELETE_PATTERN = Pattern.compile(
             "DELETE\\s+FROM\\s+(\\w+)\\s+WHERE\\s+(.*)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern CREATE_PATTERN = Pattern.compile(
+            "CREATE\\s+TABLE\\s+(\\w+)\\s*\\((.*?)\\)", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DROP_PATTERN = Pattern.compile(
+            "DROP\\s+TABLE\\s+(\\w+)", Pattern.CASE_INSENSITIVE);
 
     // Простой класс для результата парсинга
     public static class Query {
@@ -29,6 +33,7 @@ public class QueryParser {
             sql = sql.substring(0, sql.length() - 1);
         }
         sql = sql.trim();
+
 
         Matcher m = INSERT_PATTERN.matcher(sql);
         if (m.matches()) {
@@ -61,6 +66,21 @@ public class QueryParser {
             q.type = "DELETE";
             q.tableName = m.group(1);
             q.whereClause = m.group(2);
+            return q;
+        }
+
+        m = CREATE_PATTERN.matcher(sql);
+        if (m.matches()) {
+            q.type = "CREATE";
+            q.tableName = m.group(1);
+            q.columnsOrValues = m.group(2); // строка "id INT, brand STRING"
+            return q;
+        }
+
+        m = DROP_PATTERN.matcher(sql);
+        if (m.matches()) {
+            q.type = "DROP";
+            q.tableName = m.group(1);
             return q;
         }
 
