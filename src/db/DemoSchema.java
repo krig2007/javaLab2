@@ -6,7 +6,11 @@ import db.model.Table;
 
 import java.util.LinkedHashMap;
 
-/** Создание демонстрационных таблиц при первом запуске. */
+/**
+ Создаёт демонстрационные таблицы при первом запуске.
+ cars  — машины, PK = id, индекс по brand.
+ owners — владельцы, PK = id, car_id ссылается на cars.id.
+ */
 public final class DemoSchema {
     private DemoSchema() {}
 
@@ -21,15 +25,15 @@ public final class DemoSchema {
                 Table cars = new Table("cars", schema, "id");
                 cars.createIndex("brand");
                 db.addTable(cars);
-                System.out.println("Создана таблица 'cars'.");
             }
             if (!db.hasTable("owners")) {
                 LinkedHashMap<String, DataType> schema = new LinkedHashMap<>();
                 schema.put("id", DataType.INT);
                 schema.put("name", DataType.STRING);
                 schema.put("car_id", DataType.INT);
-                db.addTable(new Table("owners", schema, "id"));
-                System.out.println("Создана таблица 'owners'.");
+                Table owners = new Table("owners", schema, "id");
+                owners.addForeignKey("car_id", "cars.id");
+                db.addTable(owners);
             }
         } catch (DbException e) {
             System.err.println("Не удалось создать демо-схему: " + e.getMessage());

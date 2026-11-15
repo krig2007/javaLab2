@@ -23,19 +23,18 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Главное окно мини-СУБД.
- * <p>Содержит:</p>
- * <ul>
- *   <li>слева — список таблиц (двойной клик открывает {@code SELECT *});</li>
- *   <li>сверху — поле ввода SQL + кнопки;</li>
- *   <li>снизу — вкладки «Результат» (JTable) и «Лог».</li>
- * </ul>
+ Главное окно.
+ Слева — список таблиц (двойной клик открывает SELECT *).
+ Сверху — поле SQL и кнопки.
+ Снизу — вкладки «Результат» (JTable) и «Лог».
+ Запрос выполняется в фоне (SwingWorker), чтобы окно не залипало на больших выборках.
  */
 public class MainFrame extends JFrame {
 
     private final Database db;
     private final QueryExecutor executor;
 
+    // Компоненты формы
     private final JTextArea sqlArea = new JTextArea(4, 60);
     private final DefaultTableModel resultModel;
     private final JTable resultTable;
@@ -51,6 +50,7 @@ public class MainFrame extends JFrame {
         this.db = db;
         this.executor = new QueryExecutor(db);
 
+        // Результат — только для чтения
         this.resultModel = new DefaultTableModel() {
             @Override public boolean isCellEditable(int row, int col) { return false; }
         };
@@ -58,30 +58,41 @@ public class MainFrame extends JFrame {
         this.resultTable.setAutoResizeMode(JTable.AUTO_RESIZE_OFF);
         this.resultTable.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
 
+        // Поле SQL
         this.sqlArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 14));
         this.sqlArea.setLineWrap(true);
         this.sqlArea.setWrapStyleWord(true);
 
+        // Лог — только для чтения
         this.logArea.setEditable(false);
         this.logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
 
+        // 1. Собираем UI и меню
         buildLayout();
         buildMenu();
         installShortcuts();
         installTableListBehavior();
         refreshTableList();
 
+        // 2. При закрытии спрашиваем «сохранить?»
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) { onExit(); }
         });
+
         setSize(1100, 750);
         setLocationRelativeTo(null);
     }
 
-    // ---------- построение интерфейса ----------
-
+    /*
+     Сборка интерфейса:
+     - слева список таблиц,
+     - сверху поле SQL + кнопки,
+     - снизу вкладки результата и лога,
+     - внизу статус-бар.
+     */
     private void buildLayout() {
+        // 1. Список таблиц
         JPanel tablesPanel = new JPanel(new BorderLayout(0, 4));
         tablesPanel.setBorder(BorderFactory.createEmptyBorder(8, 8, 4, 4));
         tablesPanel.add(new JLabel("Таблицы (двойной клик — открыть):"), BorderLayout.NORTH);
@@ -89,6 +100,7 @@ public class MainFrame extends JFrame {
         tablesPanel.add(new JScrollPane(tableList), BorderLayout.CENTER);
         tablesPanel.setPreferredSize(new Dimension(220, 140));
 
+        // 2. Поле SQL и кнопки
         JPanel sqlPanel = new JPanel(new BorderLayout(4, 4));
         sqlPanel.setBorder(BorderFactory.createEmptyBorder(8, 4, 4, 8));
         sqlPanel.add(new JLabel("SQL-запрос (Ctrl+Enter — выполнить):"), BorderLayout.NORTH);
@@ -106,24 +118,32 @@ public class MainFrame extends JFrame {
         btnPanel.add(executeButton);
         sqlPanel.add(btnPanel, BorderLayout.SOUTH);
 
+        // 3. Верхняя панель = таблицы + SQL
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.add(tablesPanel, BorderLayout.WEST);
         topPanel.add(sqlPanel, BorderLayout.CENTER);
 
+        // 4. Вкладки с результатом и логом
         resultTabs.addTab("Результат", new JScrollPane(resultTable));
         resultTabs.addTab("Лог", new JScrollPane(logArea));
 
+        // 5. Разделяем верх и низ
         JSplitPane split = new JSplitPane(JSplitPane.VERTICAL_SPLIT, topPanel, resultTabs);
         split.setResizeWeight(0.28);
         add(split, BorderLayout.CENTER);
 
+        // 6. Статус-бар
         statusLabel.setBorder(BorderFactory.createEmptyBorder(4, 8, 4, 8));
         add(statusLabel, BorderLayout.SOUTH);
 
+        // 7. Заготовка в поле SQL
         sqlArea.setText("SELECT * FROM cars;");
         sqlArea.selectAll();
     }
 
+    /*
+     Меню сверху: Файл (сохранить/выход)
+     */
     private void buildMenu() {
         JMenuBar bar = new JMenuBar();
 
@@ -140,6 +160,9 @@ public class MainFrame extends JFrame {
         setJMenuBar(bar);
     }
 
+    /*
+     Ctrl+Enter внутри поля SQL = выполнить запрос.
+     */
     private void installShortcuts() {
         sqlArea.getInputMap().put(KeyStroke.getKeyStroke("ctrl ENTER"), "execute");
         sqlArea.getActionMap().put("execute", new AbstractAction() {
@@ -147,6 +170,9 @@ public class MainFrame extends JFrame {
         });
     }
 
+    /*
+     Двойной клик по таблице в списке = подставить "SELECT * FROM <t>;" и выполнить.
+     */
     private void installTableListBehavior() {
         tableList.addMouseListener(new MouseAdapter() {
             @Override public void mouseClicked(MouseEvent e) {
@@ -161,8 +187,13 @@ public class MainFrame extends JFrame {
         });
     }
 
-    // ---------- выполнение запроса ----------
-
+    /*
+     Выполнение запроса.
+     1. Берём текст, режем по ; (если несколько запросов через ;).
+     2. Запускаем SwingWorker: в фоне парсим и выполняем.
+     3. В EDT по завершении обновляем UI.
+     Если хоть один запрос изменил БД — сохраняем её на диск.
+     */
     private void onExecute(ActionEvent e) {
         String sql = sqlArea.getText().trim();
         if (sql.isEmpty()) return;
@@ -181,6 +212,7 @@ public class MainFrame extends JFrame {
                         Query q = QueryParser.parse(part);
                         results.add(executor.execute(q));
                     } catch (DbException ex) {
+                        // На первой же ошибке останавливаемся — дальше выполнять нет смысла
                         results.add(QueryResult.error(ex.getMessage()));
                         break;
                     }
@@ -203,6 +235,13 @@ public class MainFrame extends JFrame {
         }.execute();
     }
 
+    /*
+     Раскладываем один результат в UI:
+     - MESSAGE -> в лог,
+     - TABLE   -> в JTable,
+     - ERROR   -> в лог с префиксом.
+     Возвращаем true, если БД была изменена.
+     */
     private boolean applyResult(QueryResult r) {
         switch (r.kind) {
             case MESSAGE:
@@ -222,6 +261,10 @@ public class MainFrame extends JFrame {
         return r.modified;
     }
 
+    /*
+     Заполняем JTable результатом SELECT.
+     NULL-значения показываем как пустую ячейку.
+     */
     private void showTable(List<String> columns, List<Row> rows) {
         resultModel.setRowCount(0);
         resultModel.setColumnCount(0);
@@ -238,6 +281,10 @@ public class MainFrame extends JFrame {
         autoSizeColumns();
     }
 
+    /*
+     Автоподбор ширины колонок: смотрим заголовок и первые 200 строк,
+     чтобы не растягивать ячейку на весь экран из-за одного длинного значения.
+     */
     private void autoSizeColumns() {
         FontMetrics fm = resultTable.getFontMetrics(resultTable.getFont());
         for (int i = 0; i < resultTable.getColumnCount(); i++) {
@@ -254,18 +301,28 @@ public class MainFrame extends JFrame {
         }
     }
 
+    /*
+     Блокируем кнопку «Выполнить» и меняем статус, пока идёт запрос.
+     */
     private void setBusy(boolean busy) {
         executeButton.setEnabled(!busy);
         statusLabel.setText(busy ? "Выполняется..." : "Готово");
     }
 
-    // ---------- вспомогательное ----------
+    // ---------- Вспомогательное ----------
 
+    /*
+     Пишем строку в лог и прокручиваем вниз, чтобы было видно последнее сообщение.
+     */
     private void log(String msg) {
         logArea.append(msg + "\n");
         logArea.setCaretPosition(logArea.getDocument().getLength());
     }
 
+    /*
+     Обновляем список таблиц слева.
+     Пытаемся сохранить текущее выделение, чтобы список не «прыгал».
+     */
     private void refreshTableList() {
         String selected = tableList.getSelectedValue();
         tableListModel.clear();
@@ -275,6 +332,9 @@ public class MainFrame extends JFrame {
         }
     }
 
+    /*
+     Сохранение БД на диск с обработкой ошибок.
+     */
     private boolean saveDb() {
         try {
             StorageManager.save(db);
@@ -289,6 +349,11 @@ public class MainFrame extends JFrame {
         }
     }
 
+    /*
+     Закрытие окна: спрашиваем «сохранить?».
+     Если пользователь нажал Cancel или закрыл диалог — не выходим.
+     Если Yes — сохраняем, и только при успехе выходим.
+     */
     private void onExit() {
         int ans = JOptionPane.showConfirmDialog(this,
                 "Сохранить БД перед выходом?", "Выход",
