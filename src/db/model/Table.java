@@ -7,12 +7,14 @@ import java.io.Serializable;
 import java.util.*;
 
 /**
- * Таблица: схема + строки + первичный ключ + набор индексов.
- * <p>Инварианты:</p>
- * <ul>
- *   <li>первичный ключ уникален;</li>
- *   <li>все индексы консистентны с содержимым {@code rows}.</li>
- * </ul>
+ Одна таблица БД.
+ Хранит:
+   - схему (имя колонки -> тип),
+   - сами строки,
+   - первичные ключи (для быстрой проверки уникальности),
+   - вторичные индексы по колонкам.
+ Все модификации данных идут только через методы этой таблицы,
+ поэтому индексы и PK всегда остаются консистентными.
  */
 public class Table implements Serializable {
     private final String name;
@@ -34,10 +36,11 @@ public class Table implements Serializable {
     public String getPrimaryKeyColumn() { return primaryKeyColumn; }
     public Map<String, Index> getIndexes() { return Collections.unmodifiableMap(indexes); }
 
-    /**
-     * Вставляет строку с проверкой уникальности PK и типов значений.
-     *
-     * @throws DbException если PK отсутствует / дубликат / тип не совпадает
+    /*
+     Вставка строки.
+     1. Проверяем, что PK заполнен и его ещё нет в таблице.
+     2. Проверяем, что тип каждого значения совпадает со схемой.
+     3. Добавляем строку в список и во все существующие индексы.
      */
     public void insert(Row row) throws DbException {
         Value pkValue = row.get(primaryKeyColumn);
@@ -60,10 +63,11 @@ public class Table implements Serializable {
         for (Index idx : indexes.values()) idx.add(row);
     }
 
-    /**
-     * Обновляет одну колонку в строке с поддержкой индексов и уникальности PK.
-     *
-     * @throws DbException если колонка не найдена / тип неверен / дубликат PK
+    /*
+     Обновление одного поля в строке.
+     Отдельно обрабатываем случай, когда меняется сам PK:
+     нужно снять старый ключ из HashSet и проверить новый на уникальность.
+     Также обновляем индексы: удаляем из старого бакета, добавляем в новый.
      */
     public void update(Row row, String column, Value newValue) throws DbException {
         DataType expected = schema.get(column);
@@ -73,6 +77,7 @@ public class Table implements Serializable {
         }
         Value oldValue = row.get(column);
 
+        // 1. Если меняется PK — обновляем множество ключей
         if (column.equals(primaryKeyColumn)) {
             Object oldPk = oldValue == null ? null : oldValue.getData();
             Object newPk = newValue == null ? null : newValue.getData();
@@ -85,36 +90,42 @@ public class Table implements Serializable {
             }
         }
 
+        // 2. Если по этой колонке есть индекс — перекладываем строку
         Index idx = indexes.get(column);
         if (idx != null) {
-            Object oldKey = null;
             if (oldValue != null) {
-                oldKey = oldValue.getData();
+                idx.remove(row, oldValue.getData());
             }
-            idx.remove(row, oldKey);
-
-            Object newKey = null;
             if (newValue != null) {
-                newKey = newValue.getData();
+                idx.add(row, newValue.getData());
             }
-            idx.add(row, newKey);
         }
 
+        // 3. Записываем новое значение в строку
         row.set(column, newValue);
     }
 
-    /** Удаляет строку из таблицы и из всех индексов. */
+    /*
+     Удаление строки.
+     Запись убирается из списка, из множества ключей и из всех индексов.
+     */
     public void delete(Row row) {
         Value pk = row.get(primaryKeyColumn);
         if (pk != null) primaryKeys.remove(pk.getData());
         for (Index idx : indexes.values()) {
             Value v = row.get(idx.getColumnName());
-            idx.remove(row, v == null ? null : v.getData());
+            if (v != null && v.getData() != null) {
+                idx.remove(row, v.getData());
+            }
         }
         rows.remove(row);
     }
 
-    /** Создаёт индекс по колонке. Если уже существует — возвращает его. */
+    /*
+     Создание индекса.
+     Проходим по всем уже существующим строкам и добавляем их в новый индекс.
+     Если индекс уже есть — просто возвращаем его.
+     */
     public Index createIndex(String columnName) throws DbException {
         if (!schema.containsKey(columnName))
             throw new DbException("Колонка не найдена: " + columnName);

@@ -1,6 +1,8 @@
 package db;
 
-/** Нарушение уникальности первичного ключа. */
+/**
+ Попытка вставить/обновить запись с уже существующим первичным ключом.
+ */
 public class DuplicateKeyException extends DbException {
     public DuplicateKeyException(String message) { super(message); }
 }

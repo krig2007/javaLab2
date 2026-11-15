@@ -5,7 +5,11 @@ import db.model.DataType;
 import java.util.LinkedHashMap;
 import java.util.List;
 
-/** Разобранный запрос. Заполняются поля, соответствующие {@link #type}. */
+/**
+ Разобранный SQL-запрос.
+ Сюда QueryParser складывает все части, а QueryExecutor их читает.
+ Поля заполняются в зависимости от type — остальные остаются null.
+ */
 public class Query {
     public enum Type { INSERT, SELECT, UPDATE, DELETE, CREATE_INDEX, CREATE_TABLE, DROP_TABLE }
 
@@ -13,11 +17,11 @@ public class Query {
     public String tableName;
 
     // INSERT
-    public List<String> insertColumns;
-    public List<List<String>> insertValues;
+    public List<String> insertColumns;        // null — значит все колонки по схеме
+    public List<List<String>> insertValues;    // список строк, каждая = список литералов
 
     // SELECT
-    public List<String> selectColumns;
+    public List<String> selectColumns;         // null или ["*"] — значит все
 
     // UPDATE
     public LinkedHashMap<String, String> setClauses;

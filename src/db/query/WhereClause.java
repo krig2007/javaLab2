@@ -9,8 +9,9 @@ import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 
 /**
- * Условие WHERE: колонка, оператор, значение.
- * <p>Поддерживаются операторы: {@code =, !=, <>, <, >, <=, >=}.</p>
+ Условие WHERE: колонка, оператор, значение.
+ Поддерживаются операторы =, !=, <>, <, >, <=, >=.
+ Литерал справа парсится один раз (prepare), а не на каждой строке.
  */
 public class WhereClause {
     private static final String[] OPERATORS = {">=", "<=", "<>", "!=", "=", ">", "<"};
@@ -28,7 +29,11 @@ public class WhereClause {
         this.rawValue = rawValue;
     }
 
-    /** Разбирает строку условия. Возвращает {@code null} для пустой/отсутствующей строки. */
+    /*
+     Разбираем строку WHERE.
+     Возвращаем null, если условие пустое или не задано.
+     Ищем оператор слева направо по списку OPERATORS (сначала длинные).
+     */
     public static WhereClause parse(String where) throws DbException {
         if (where == null) return null;
         where = where.trim();
@@ -45,23 +50,31 @@ public class WhereClause {
         throw new DbException("Не удалось разобрать условие WHERE: " + where);
     }
 
-    /** Кэширует литерал значения, чтобы не парсить его на каждой строке. */
+    /*
+     Заранее парсим литерал под тип колонки.
+     Это нужно, чтобы не делать parseLiteral на каждой строке (быстрее).
+     */
     public void prepare(DataType type) throws DbException {
         this.cachedType = type;
         this.cachedTarget = parseLiteral(rawValue, type);
     }
 
-    /** Проверка строки с уже подготовленным типом (после {@link #prepare}). */
+    // Сравнение строки с уже подготовленным условием
     public boolean matches(Row row) throws DbException {
         if (cachedType == null) throw new DbException("WhereClause не подготовлен");
         return matches(row, cachedType, cachedTarget);
     }
 
-    /** Универсальная проверка строки. */
+    // Сравнение строки с условием без prepare (медленнее, но удобно в тестах)
     public boolean matches(Row row, DataType type) throws DbException {
         return matches(row, type, parseLiteral(rawValue, type));
     }
 
+    /*
+     Сравниваем значения в зависимости от типа.
+     Числа приводим к double, строки и даты — через compareTo,
+     boolean — только на = и !=.
+     */
     private boolean matches(Row row, DataType type, Value target) {
         Value rowValue = row.get(column);
         if (rowValue == null || rowValue.getData() == null) return false;
@@ -126,7 +139,11 @@ public class WhereClause {
         return false;
     }
 
-    /** Преобразует литерал SQL в {@link Value} указанного типа. */
+    /*
+     Превращаем SQL-литерал в Value нужного типа.
+     Строки должны быть в одинарных кавычках.
+     Для DATE используем LocalDate.parse.
+     */
     public static Value parseLiteral(String raw, DataType type) throws DbException {
         raw = raw.trim();
         if (raw.equalsIgnoreCase("NULL")) return null;
@@ -154,6 +171,7 @@ public class WhereClause {
         }
     }
 
+    // Снимаем внешние кавычки, а удвоенные '' превращаем в '
     private static String unquote(String s) {
         s = s.trim();
         if (s.length() >= 2 && s.charAt(0) == '\'' && s.charAt(s.length() - 1) == '\'') {

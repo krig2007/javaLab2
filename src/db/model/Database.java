@@ -5,7 +5,12 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Набор таблиц с сохранением порядка добавления. */
+/**
+ Корень БД.
+ Хранит таблицы в LinkedHashMap, чтобы порядок добавления сохранялся
+ (удобно для вывода списка таблиц в GUI).
+ Это же дерево целиком уходит в файл database.db.
+ */
 public class Database implements Serializable {
     private final Map<String, Table> tables = new LinkedHashMap<>();
 
