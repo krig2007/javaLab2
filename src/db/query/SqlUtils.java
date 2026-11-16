@@ -7,14 +7,14 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- Вспомогательные функции для разбора SQL.
+ Вспомогательные методы для разбора SQL-запросов.
  */
 public final class SqlUtils {
     private SqlUtils() {}
 
     /*
-     Делим строку по разделителю, но игнорируем те, что внутри кавычек или скобок.
-     Это нужно для VALUES (1, 'a, b'), (2, 'c') — запятая внутри кавычек не должна резать.
+     Разбиваем строку по разделителю, не затрагивая разделители внутри кавычек и скобок.
+     Например, в VALUES (1, 'a, b'), (2, 'c') запятая внутри строки должна остаться на месте.
      */
     public static List<String> splitTopLevel(String s, char delim) {
         List<String> result = new ArrayList<>();
@@ -47,8 +47,8 @@ public final class SqlUtils {
     }
 
     /*
-     Убираем внешние круглые скобки, если они есть.
-     "(id, brand)" -> "id, brand"
+     Убираем скобки по краям строки, если они есть.
+     Например: "(id, brand)" превращается в "id, brand".
      */
     public static String stripParens(String s) {
         s = s.trim();
@@ -57,8 +57,8 @@ public final class SqlUtils {
     }
 
     /*
-     Превращаем имя типа в DataType.
-     Поддерживаем алиасы: INTEGER = INT, FLOAT = DOUBLE, VARCHAR = STRING и т.д.
+     Преобразуем название типа данных в соответствующий DataType.
+     Также учитываем альтернативные названия: INTEGER, FLOAT, VARCHAR и другие.
      */
     public static DataType parseDataType(String s) throws SqlParseException {
         switch (s.toUpperCase()) {
