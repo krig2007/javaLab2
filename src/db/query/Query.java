@@ -6,9 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 
 /**
- Разобранный SQL-запрос.
- Сюда QueryParser складывает все части, а QueryExecutor их читает.
- Поля заполняются в зависимости от type — остальные остаются null.
+ Хранит данные SQL-запроса после его разбора.
+QueryParser заполняет нужные поля, а QueryExecutor использует их при выполнении запроса.
+В зависимости от типа запроса часть полей может оставаться null.
  */
 public class Query {
     public enum Type { INSERT, SELECT, UPDATE, DELETE, CREATE_INDEX, CREATE_TABLE, DROP_TABLE }
@@ -17,11 +17,11 @@ public class Query {
     public String tableName;
 
     // INSERT
-    public List<String> insertColumns;        // null — значит все колонки по схеме
-    public List<List<String>> insertValues;    // список строк, каждая = список литералов
+    public List<String> insertColumns;        // null - если указаны все колонки таблицы
+    public List<List<String>> insertValues;    // значения для каждой добавляемой строки
 
     // SELECT
-    public List<String> selectColumns;         // null или ["*"] — значит все
+    public List<String> selectColumns;         // null или ["*"] — если нужно выбрать все колонки
 
     // UPDATE
     public LinkedHashMap<String, String> setClauses;
