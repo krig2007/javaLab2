@@ -5,13 +5,12 @@ import db.model.Database;
 import java.io.*;
 import java.nio.file.*;
 
-/**
- Загрузка и сохранение БД в один файл database.db.
- Сохранение атомарное: сначала пишем в .tmp, потом переименовываем.
- Так при сбое посреди записи не останется «полу-файла» на месте database.db.
- Если файл окажется битым — переименовываем его в .corrupt, чтобы не потерять,
- и стартуем с пустой БД.
- */
+/*
+Загружает и сохраняет БД в файл database.db.
+При сохранении сначала создаётся временный файл, а затем он заменяет основной.
+Это позволяет не потерять данные, если во время записи произойдёт сбой.
+Если файл повреждён, он переименовывается в .corrupt, а программа создаёт пустую БД.
+*/
 public final class StorageManager {
     private static final String FILE_NAME = "database.db";
     private static final String TEMP_NAME = FILE_NAME + ".tmp";
@@ -19,9 +18,8 @@ public final class StorageManager {
     private StorageManager() {}
 
     /*
-     Атомарно сохраняем БД на диск.
-     1. Пишем во временный файл.
-     2. Перемещаем его поверх database.db с флагом ATOMIC_MOVE.
+     Атомарно Сохраняем БД на диск.
+     Сначала записываем данные во временный файл, затем перемещаем его на место database.db.
      */
     public static void save(Database db) throws IOException {
         File tmp = new File(TEMP_NAME);
@@ -39,9 +37,9 @@ public final class StorageManager {
     }
 
     /*
-     Загружаем БД.
-     Если файла нет — возвращаем пустую БД.
-     Если файл битый (например, старая версия формата) — переименовываем и стартуем с пустой.
+     Загружаем БД из файла.
+     Если файла нет, создаём новую пустую базу.
+     Если файл повреждён, сохраняем его отдельно и запускаем пустую БД.
      */
     public static Database load() {
         File file = new File(FILE_NAME);
