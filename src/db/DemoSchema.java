@@ -7,9 +7,9 @@ import db.model.Table;
 import java.util.LinkedHashMap;
 
 /**
- Создаёт демонстрационные таблицы при первом запуске.
- cars  — машины, PK = id, индекс по brand.
- owners — владельцы, PK = id, car_id ссылается на cars.id.
+Создаёт таблицы cars и owners при запуске программы, если их ещё нет.
+В cars хранятся машины, первичный ключ — id, также есть индекс по brand.
+В owners хранятся владельцы машин, car_id связан с cars.id.
  */
 public final class DemoSchema {
     private DemoSchema() {}
