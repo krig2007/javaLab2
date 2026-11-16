@@ -9,15 +9,15 @@ import java.util.List;
 import java.util.Map;
 
 /**
- Исполнитель запросов.
- Не печатает ничего сам — возвращает QueryResult, а GUI решает, как это показать.
+Выполняет SQL-запросы и возвращает результат их выполнения.
+Сам ничего не выводит - отображением результата занимается GUI.
  */
 public class QueryExecutor {
     private final Database db;
 
     public QueryExecutor(Database db) { this.db = db; }
 
-    // Точка входа: раздаём запрос по обработчикам
+    // Определяем тип запроса и вызываем нужный метод
     public QueryResult execute(Query q) throws DbException {
         switch (q.type) {
             case INSERT:        return executeInsert(q);
@@ -31,7 +31,7 @@ public class QueryExecutor {
         }
     }
 
-    // Найти таблицу или бросить понятную ошибку
+    // Получаем таблицу по имени. Если её нет, выбрасываем исключение
     private Table requireTable(String name) throws TableNotFoundException {
         Table t = db.getTable(name);
         if (t == null) throw new TableNotFoundException(name);
@@ -39,10 +39,10 @@ public class QueryExecutor {
     }
 
     /*
-     INSERT.
-     Если insertColumns == null — берём все колонки по схеме.
-     Иначе — только указанные, остальные останутся NULL.
-     Проверяем, что количество значений совпадает с количеством колонок.
+    Добавляем новые записи в таблицу.
+    Если insertColumns == null, используются все колонки таблицы.
+    Если колонки указаны вручную, остальные получат значение NULL.
+    Перед вставкой проверяем, что количество значений совпадает с количеством колонок.
      */
     private QueryResult executeInsert(Query q) throws DbException {
         Table table = requireTable(q.tableName);
@@ -66,7 +66,7 @@ public class QueryExecutor {
                 Value v = WhereClause.parseLiteral(rawRow.get(i), type);
                 row.set(col, v);
             }
-            // --- ПРОВЕРКА ВНЕШНИХ КЛЮЧЕЙ ---
+            // Проверяем, существуют ли записи, на которые ссылаются внешние ключи
             for (java.util.Map.Entry<String, String> fk : table.getForeignKeys().entrySet()) {
                 String fkCol = fk.getKey();
                 String target = fk.getValue();
@@ -103,10 +103,10 @@ public class QueryExecutor {
     }
 
     /*
-     SELECT.
-     Если в WHERE есть = по индексированной колонке — идём через индекс (O(1)).
-     Иначе — полный скан (O(n)).
-     После получения результата печатаем только запрошенные колонки.
+    Получаем записи из таблицы.
+    Если условие WHERE использует индексированную колонку и оператор =,
+    поиск выполняется через индекс. В остальных случаях проверяются все строки.
+    В результате остаются только запрошенные колонки.
      */
     private QueryResult executeSelect(Query q) throws DbException {
         Table table = requireTable(q.tableName);
@@ -115,7 +115,7 @@ public class QueryExecutor {
         String extraMsg = null;
 
         if (wc == null) {
-            // Без WHERE — все строки
+            // Если WHERE нет, возвращаем все строки таблицы
             result = new ArrayList<>(table.getRows());
         } else {
             DataType type = table.getSchema().get(wc.column);
@@ -123,7 +123,7 @@ public class QueryExecutor {
             wc.prepare(type);
 
             if ("=".equals(wc.operator) && table.hasIndex(wc.column)) {
-                // 1. Через индекс: сразу берём только строки с этим ключом
+                // Ищем нужные строки через индекс
                 Value key = WhereClause.parseLiteral(wc.rawValue, type);
                 result = new ArrayList<>();
                 if (key != null && key.getData() != null) {
@@ -133,13 +133,13 @@ public class QueryExecutor {
                 }
                 extraMsg = "(использован индекс: " + wc.column + ")";
             } else {
-                // 2. Полный скан
+                // Если индекс не подходит, проверяем строки по очереди
                 result = new ArrayList<>();
                 for (Row row : table.getRows()) if (wc.matches(row)) result.add(row);
             }
         }
 
-        // Проверяем, что все запрошенные колонки есть в схеме
+        // Проверяем, что все указанные колонки есть в таблице
         List<String> cols = q.selectColumns != null
                 ? q.selectColumns
                 : new ArrayList<>(table.getSchema().keySet());
@@ -151,9 +151,9 @@ public class QueryExecutor {
     }
 
     /*
-     UPDATE.
-     Сначала готовим все новые значения (чтобы не начать менять БД и упасть посередине),
-     затем выбираем строки по WHERE и применяем изменения через Table.update.
+    Обновляем записи в таблице.
+    Сначала проверяем и подготавливаем новые значения, чтобы не менять данные,
+    если в процессе обнаружится ошибка. Затем находим нужные строки и обновляем их
      */
     private QueryResult executeUpdate(Query q) throws DbException {
         Table table = requireTable(q.tableName);
@@ -164,7 +164,7 @@ public class QueryExecutor {
             wc.prepare(type);
         }
 
-        // Подготовка SET-значений
+        // Проверяем значения, которые нужно записать в колонки
         LinkedHashMap<String, Value> prepared = new LinkedHashMap<>();
         for (Map.Entry<String, String> e : q.setClauses.entrySet()) {
             String col = e.getKey();
@@ -173,13 +173,13 @@ public class QueryExecutor {
             prepared.put(col, WhereClause.parseLiteral(e.getValue(), type));
         }
 
-        // Поиск строк под изменение
+        // Находим строки, которые подходят под условие WHERE
         List<Row> targets = new ArrayList<>();
         for (Row row : table.getRows()) {
             if (wc == null || wc.matches(row)) targets.add(row);
         }
 
-        // Применение
+        // Записываем новые значения
         for (Row row : targets) {
             for (Map.Entry<String, Value> e : prepared.entrySet()) {
                 table.update(row, e.getKey(), e.getValue());
@@ -189,9 +189,8 @@ public class QueryExecutor {
     }
 
     /*
-     DELETE.
-     Выбираем строки по WHERE, затем удаляем через Table.delete —
-     он сам обновит PK и индексы.
+    Удаляем записи, подходящие под условие WHERE.
+    После поиска передаём их в Table.delete, который также обновляет первичный ключ и индексы.
      */
     private QueryResult executeDelete(Query q) throws DbException {
         Table table = requireTable(q.tableName);
@@ -209,7 +208,7 @@ public class QueryExecutor {
         return QueryResult.message("Удалено записей: " + toDelete.size(), true);
     }
 
-    // CREATE INDEX
+    // Создаём индекс для указанной колонки
     private QueryResult executeCreateIndex(Query q) throws DbException {
         Table table = requireTable(q.tableName);
         table.createIndex(q.indexColumn);
@@ -217,13 +216,13 @@ public class QueryExecutor {
                 + q.tableName + "(" + q.indexColumn + ")", true);
     }
 
-    // CREATE TABLE
+    // Создаём новую таблицу
     private QueryResult executeCreateTable(Query q) throws DbException {
         if (db.hasTable(q.tableName))
             throw new ExecutionException("Таблица уже существует: " + q.tableName);
         Table t = new Table(q.tableName, q.createSchema, q.primaryKeyColumn);
 
-        // Добавляем внешние ключи из запроса (если они были указаны в FOREIGN KEY)
+        // Добавляем внешние ключи, если они указаны в запросе
         if (q.foreignKeys != null) {
             for (Map.Entry<String, String> fk : q.foreignKeys.entrySet()) {
                 t.addForeignKey(fk.getKey(), fk.getValue());
@@ -234,7 +233,7 @@ public class QueryExecutor {
         return QueryResult.message("Создана таблица '" + q.tableName + "'", true);
     }
 
-    // DROP TABLE
+    // Удаляем таблицу из базы данных
     private QueryResult executeDropTable(Query q) throws DbException {
         if (!db.hasTable(q.tableName)) throw new TableNotFoundException(q.tableName);
         db.dropTable(q.tableName);
