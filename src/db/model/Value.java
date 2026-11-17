@@ -6,7 +6,8 @@ import java.util.Objects;
 
 /**
  Значение ячейки таблицы: тип + сами данные.
- Инвариант: поле type соответствует классу объекта data.
+ Гарантируется, что тип поля (DataType) всегда соответствует
+ одному из классов Java из поля data (INT -> Integer, STRING -> String)
  Именно этот объект сериализуется и хранится в файле.
  */
 public class Value implements Serializable {
@@ -20,16 +21,6 @@ public class Value implements Serializable {
 
     public DataType getType() { return type; }
     public Object getData() { return data; }
-
-    /*
-     Приводим данные к конкретному типу.
-     Если тип не совпадает — будет ClassCastException.
-     */
-    public int asInt()         { return (Integer) data; }
-    public double asDouble()   { return (Double) data; }
-    public String asString()   { return (String) data; }
-    public LocalDate asDate()  { return (LocalDate) data; }
-    public boolean asBoolean() { return (Boolean) data; }
 
     @Override
     public String toString() { return data == null ? "NULL" : data.toString(); }

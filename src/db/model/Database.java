@@ -8,8 +8,8 @@ import java.util.Map;
 /**
  Корень БД.
  Хранит таблицы в LinkedHashMap, чтобы порядок добавления сохранялся
- (удобно для вывода списка таблиц в GUI).
- Это же дерево целиком уходит в файл database.db.
+ (пригодится для вывода списка таблиц в GUI).
+ Данная структура записывается в .db файл.
  */
 public class Database implements Serializable {
     private final Map<String, Table> tables = new LinkedHashMap<>();

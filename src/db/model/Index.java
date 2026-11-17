@@ -38,7 +38,7 @@ public class Index implements Serializable {
     }
 
     /*
-     Добавляем строку с заданным ключом (например, при обновлении поля).
+     Добавляем строку с заданным ключом.
      */
     public void add(Row row, Object key) {
         if (key == null) return;
@@ -47,7 +47,7 @@ public class Index implements Serializable {
 
     /*
      Удаляем строку из цепочки по ключу.
-     Если цепочка стала пустой — убираем сам ключ, чтобы не копить мусор.
+     Если цепочка стала пустой — убираем сам ключ.
      */
     public void remove(Row row, Object key) {
         if (key == null) return;
@@ -62,7 +62,7 @@ public class Index implements Serializable {
 
     /*
      Возвращаем все строки с данным ключом.
-     Если ключа нет — пустой список (а не null).
+     Если ключа нет — пустой список.
      */
     public List<Row> lookup(Object key) {
         return indexMap.getOrDefault(key, Collections.emptyList());

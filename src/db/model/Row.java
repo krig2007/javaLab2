@@ -21,11 +21,6 @@ public class Row implements Serializable {
      */
     public Value get(String columnName) { return data.get(columnName); }
 
-    /*
-     Отдаём карту только для чтения, чтобы снаружи не сломали порядок или содержимое.
-     */
-    public Map<String, Value> getData() { return Collections.unmodifiableMap(data); }
-
     @Override
     public String toString() { return data.toString(); }
 }

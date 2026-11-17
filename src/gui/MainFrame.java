@@ -23,11 +23,10 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- Главное окно.
+ GUI
  Слева — список таблиц (двойной клик открывает SELECT *).
  Сверху — поле SQL и кнопки.
- Снизу — вкладки «Результат» (JTable) и «Лог».
- Запрос выполняется в фоне (SwingWorker), чтобы окно не залипало на больших выборках.
+ Снизу — вкладки «Результат» и «Лог».
  */
 public class MainFrame extends JFrame {
 
@@ -46,11 +45,11 @@ public class MainFrame extends JFrame {
     private JButton executeButton;
 
     public MainFrame(Database db) {
-        super("Мини-СУБД — Swing");
+        super("СУБД");
         this.db = db;
         this.executor = new QueryExecutor(db);
 
-        // Результат — только для чтения
+        // Результат - только для чтения
         this.resultModel = new DefaultTableModel() {
             @Override public boolean isCellEditable(int row, int col) { return false; }
         };
@@ -63,24 +62,24 @@ public class MainFrame extends JFrame {
         this.sqlArea.setLineWrap(true);
         this.sqlArea.setWrapStyleWord(true);
 
-        // Лог — только для чтения
+        // Лог - только для чтения
         this.logArea.setEditable(false);
         this.logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
 
-        // 1. Собираем UI и меню
+        // Собираем UI и меню
         buildLayout();
         buildMenu();
         installShortcuts();
         installTableListBehavior();
         refreshTableList();
 
-        // 2. При закрытии спрашиваем «сохранить?»
+        // При закрытии спрашиваем «сохранить?»
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent e) { onExit(); }
         });
 
-        setSize(1100, 750);
+        setSize(960, 540);
         setLocationRelativeTo(null);
     }
 
@@ -149,9 +148,9 @@ public class MainFrame extends JFrame {
 
         JMenu fileMenu = new JMenu("Файл");
         JMenuItem saveItem = new JMenuItem("Сохранить БД");
-        saveItem.addActionListener(e -> saveDb());
+        saveItem.addActionListener(_ -> saveDb());
         JMenuItem exitItem = new JMenuItem("Выход");
-        exitItem.addActionListener(e -> onExit());
+        exitItem.addActionListener(_ -> onExit());
         fileMenu.add(saveItem);
         fileMenu.addSeparator();
         fileMenu.add(exitItem);
@@ -191,7 +190,7 @@ public class MainFrame extends JFrame {
      Выполнение запроса.
      1. Берём текст, режем по ; (если несколько запросов через ;).
      2. Запускаем SwingWorker: в фоне парсим и выполняем.
-     3. В EDT по завершении обновляем UI.
+     3. По завершении обновляем UI в потоке.
      Если хоть один запрос изменил БД — сохраняем её на диск.
      */
     private void onExecute(ActionEvent e) {
@@ -212,7 +211,6 @@ public class MainFrame extends JFrame {
                         Query q = QueryParser.parse(part);
                         results.add(executor.execute(q));
                     } catch (DbException ex) {
-                        // На первой же ошибке останавливаемся — дальше выполнять нет смысла
                         results.add(QueryResult.error(ex.getMessage()));
                         break;
                     }
@@ -237,9 +235,8 @@ public class MainFrame extends JFrame {
 
     /*
      Раскладываем один результат в UI:
-     - MESSAGE -> в лог,
-     - TABLE   -> в JTable,
-     - ERROR   -> в лог с префиксом.
+     - MESSAGE и ERROR -> в лог,
+     - TABLE   -> в JTable.
      Возвращаем true, если БД была изменена.
      */
     private boolean applyResult(QueryResult r) {
@@ -271,7 +268,7 @@ public class MainFrame extends JFrame {
         for (String c : columns) resultModel.addColumn(c);
         for (Row row : rows) {
             Object[] arr = new Object[columns.size()];
-            for (int i = 0; i < columns.size(); i++) {
+            for (int i = 0; i < columns.size(); ++i) {
                 Value v = row.get(columns.get(i));
                 arr[i] = (v == null || v.getData() == null) ? null : v.getData();
             }
@@ -287,10 +284,10 @@ public class MainFrame extends JFrame {
      */
     private void autoSizeColumns() {
         FontMetrics fm = resultTable.getFontMetrics(resultTable.getFont());
-        for (int i = 0; i < resultTable.getColumnCount(); i++) {
+        for (int i = 0; i < resultTable.getColumnCount(); ++i) {
             int width = fm.stringWidth(resultTable.getColumnName(i)) + 30;
             int limit = Math.min(resultTable.getRowCount(), 200);
-            for (int j = 0; j < limit; j++) {
+            for (int j = 0; j < limit; ++j) {
                 Object val = resultTable.getValueAt(j, i);
                 if (val != null) {
                     int w = fm.stringWidth(val.toString()) + 20;
@@ -309,7 +306,7 @@ public class MainFrame extends JFrame {
         statusLabel.setText(busy ? "Выполняется..." : "Готово");
     }
 
-    // ---------- Вспомогательное ----------
+    // ========== Вспомогательное ==========
 
     /*
      Пишем строку в лог и прокручиваем вниз, чтобы было видно последнее сообщение.
@@ -321,7 +318,7 @@ public class MainFrame extends JFrame {
 
     /*
      Обновляем список таблиц слева.
-     Пытаемся сохранить текущее выделение, чтобы список не «прыгал».
+     Сохраняем текущее выделение.
      */
     private void refreshTableList() {
         String selected = tableList.getSelectedValue();

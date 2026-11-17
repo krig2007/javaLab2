@@ -11,10 +11,10 @@ import java.util.*;
  Хранит:
    - схему (имя колонки -> тип),
    - сами строки,
-   - первичные ключи (для быстрой проверки уникальности),
+   - первичные ключи,
    - вторичные индексы по колонкам.
  Все модификации данных идут только через методы этой таблицы,
- поэтому индексы и PK всегда остаются консистентными.
+ поэтому индексы и первичные ключи всегда остаются достоверными.
  */
 public class Table implements Serializable {
     private final String name;
@@ -34,12 +34,10 @@ public class Table implements Serializable {
     public String getName() { return name; }
     public Map<String, DataType> getSchema() { return Collections.unmodifiableMap(schema); }
     public List<Row> getRows() { return Collections.unmodifiableList(rows); }
-    public String getPrimaryKeyColumn() { return primaryKeyColumn; }
-    public Map<String, Index> getIndexes() { return Collections.unmodifiableMap(indexes); }
 
     /*
      Вставка строки.
-     1. Проверяем, что PK заполнен и его ещё нет в таблице.
+     1. Проверяем, что PK (первичный ключ) заполнен и уникален.
      2. Проверяем, что тип каждого значения совпадает со схемой.
      3. Добавляем строку в список и во все существующие индексы.
      */
@@ -66,9 +64,9 @@ public class Table implements Serializable {
 
     /*
      Обновление одного поля в строке.
-     Отдельно обрабатываем случай, когда меняется сам PK:
+     Отдельно обрабатываем случай, когда меняется первичный ключ:
      нужно снять старый ключ из HashSet и проверить новый на уникальность.
-     Также обновляем индексы: удаляем из старого бакета, добавляем в новый.
+     Также обновляем индексы: удаляем строку по старому значению и добавляем по новому.
      */
     public void update(Row row, String column, Value newValue) throws DbException {
         DataType expected = schema.get(column);
@@ -125,7 +123,7 @@ public class Table implements Serializable {
     /*
      Создание индекса.
      Проходим по всем уже существующим строкам и добавляем их в новый индекс.
-     Если индекс уже есть — просто возвращаем его.
+     Если индекс уже есть — возвращаем его.
      */
     public Index createIndex(String columnName) throws DbException {
         if (!schema.containsKey(columnName))
@@ -140,12 +138,13 @@ public class Table implements Serializable {
 
     public Index getIndex(String columnName) { return indexes.get(columnName); }
     public boolean hasIndex(String columnName) { return indexes.containsKey(columnName); }
-    /** Добавляет правило внешнего ключа: колонка -> целевая таблица.колонка */
+
+    /* Добавляет правило внешнего ключа: колонка -> целевая таблица.колонка */
     public void addForeignKey(String column, String targetTableAndColumn) {
         foreignKeys.put(column, targetTableAndColumn);
     }
 
-    /** Возвращает карту внешних ключей (только для чтения). */
+    /* Возвращает карту внешних ключей (только для чтения). */
     public Map<String, String> getForeignKeys() {
         return Collections.unmodifiableMap(foreignKeys);
     }
